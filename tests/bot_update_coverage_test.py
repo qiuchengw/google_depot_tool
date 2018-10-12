@@ -150,15 +150,12 @@ class BotUpdateUnittests(unittest.TestCase):
       'target_cpu': None,
       'patch_root': None,
       'patch_refs': [],
-      'gerrit_repo': None,
-      'gerrit_ref': None,
       'gerrit_rebase_patch_ref': None,
       'refs': [],
       'git_cache_dir': '',
       'cleanup_dir': None,
       'gerrit_reset': None,
       'disable_syntax_validation': False,
-      'apply_patch_on_gclient': False,
   }
 
   def setUp(self):
@@ -211,27 +208,24 @@ class BotUpdateUnittests(unittest.TestCase):
     self.assertEquals(args[idx_third_revision+1], 'src/v8@deadbeef')
     return self.call.records
 
-  def testEnableGclientExperiment(self):
-    self.params['gerrit_ref'] = 'refs/changes/12/345/6'
-    self.params['gerrit_repo'] = 'https://chromium.googlesource.com/v8/v8'
-    self.params['apply_patch_on_gclient'] = True
+  def testApplyPatchOnGclient(self):
+    ref = 'refs/changes/12/345/6'
+    repo = 'https://chromium.googlesource.com/v8/v8'
+    self.params['patch_refs'] = ['%s@%s' % (repo, ref)]
     bot_update.ensure_checkout(**self.params)
     args = self.gclient.records[0]
     idx = args.index('--patch-ref')
-    self.assertEqual(
-        args[idx+1],
-        self.params['gerrit_repo'] + '@' + self.params['gerrit_ref'])
+    self.assertEqual(args[idx+1], self.params['patch_refs'][0])
     self.assertNotIn('--patch-ref', args[idx+1:])
     # Assert we're not patching in bot_update.py
     for record in self.call.records:
-      self.assertNotIn('git fetch ' + self.params['gerrit_repo'],
+      self.assertNotIn('git fetch ' + repo,
                        ' '.join(record[0]))
 
   def testPatchRefs(self):
     self.params['patch_refs'] = [
         'https://chromium.googlesource.com/chromium/src@refs/changes/12/345/6',
         'https://chromium.googlesource.com/v8/v8@refs/changes/1/234/56']
-    self.params['apply_patch_on_gclient'] = True
     bot_update.ensure_checkout(**self.params)
     args = self.gclient.records[0]
     patch_refs = set(
@@ -285,7 +279,7 @@ class BotUpdateUnittests(unittest.TestCase):
             },
         }
     }
-    out = bot_update.create_manifest(gclient_output, None, None)
+    out = bot_update.create_manifest(gclient_output, None)
     self.assertEquals(len(out['directories']), 2)
     self.assertEquals(
         out['directories']['src']['git_checkout']['revision'],

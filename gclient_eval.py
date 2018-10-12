@@ -196,8 +196,12 @@ _GCLIENT_SCHEMA = schema.Schema(_NodeDictSchema({
     schema.Optional('target_os'): [schema.Optional(basestring)],
 
     # For recursed-upon sub-dependencies, check out their own dependencies
-    # relative to the paren't path, rather than relative to the .gclient file.
+    # relative to the parent's path, rather than relative to the .gclient file.
     schema.Optional('use_relative_paths'): bool,
+
+    # For recursed-upon sub-dependencies, run their hooks relative to the
+    # parent's path instead of relative to the .gclient file.
+    schema.Optional('use_relative_hooks'): bool,
 
     # Variables that can be referenced using Var() - see 'deps'.
     schema.Optional('vars'): _NodeDictSchema({
@@ -602,7 +606,9 @@ def RenderDEPSFile(gclient_dict):
 
 def _UpdateAstString(tokens, node, value):
   position = node.lineno, node.col_offset
-  quote_char = tokens[position][1][0]
+  quote_char = ''
+  if isinstance(node, ast.Str):
+    quote_char = tokens[position][1][0]
   tokens[position][1] = quote_char + value + quote_char
   node.s = value
 
