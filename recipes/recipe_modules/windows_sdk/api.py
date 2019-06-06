@@ -7,6 +7,7 @@ Microsoft Visual Studio installation.
 
 Available only to Google-run bots."""
 
+import collections
 from contextlib import contextmanager
 
 from recipe_engine import recipe_api
@@ -15,13 +16,15 @@ from recipe_engine import recipe_api
 class WindowsSDKApi(recipe_api.RecipeApi):
   """API for using Windows SDK distributed via CIPD."""
 
+  SDKPaths = collections.namedtuple('SDKPaths', ['win_sdk', 'dia_sdk'])
+
   def __init__(self, sdk_properties, *args, **kwargs):
     super(WindowsSDKApi, self).__init__(*args, **kwargs)
 
     self._sdk_properties = sdk_properties
 
   @contextmanager
-  def __call__(self, path=None, version=None, enabled=True):
+  def __call__(self, path=None, version=None, enabled=True, target_arch='x64'):
     """Setups the SDK environment when enabled.
 
     Args:
@@ -30,6 +33,14 @@ class WindowsSDKApi(recipe_api.RecipeApi):
       version (str): CIPD version of the SDK
         (default is set via $infra/windows_sdk.version property)
       enabled (bool): Whether the SDK should be used or not.
+      target_arch (str): 'x86' or 'x64'.
+
+    Yields:
+      If enabled, yields SDKPaths object with paths to well-known roots within
+      the deployed bundle:
+        * win_sdk - a Path to the root of the extracted Windows SDK.
+        * dia_sdk - a Path to the root of the extracted Debug Interface Access
+          SDK.
 
     Raises:
         StepFailure or InfraFailure.
@@ -39,8 +50,10 @@ class WindowsSDKApi(recipe_api.RecipeApi):
           path or self.m.path['cache'].join('windows_sdk'),
           version or self._sdk_properties['version'])
       try:
-        with self.m.context(**self._sdk_env(sdk_dir)):
-          yield
+        with self.m.context(**self._sdk_env(sdk_dir, target_arch)):
+          yield WindowsSDKApi.SDKPaths(
+              sdk_dir.join('win_sdk'),
+              sdk_dir.join('DIA SDK'))
       finally:
         # cl.exe automatically starts background mspdbsrv.exe daemon which
         # needs to be manually stopped so Swarming can tidy up after itself.
@@ -68,13 +81,14 @@ class WindowsSDKApi(recipe_api.RecipeApi):
       self.m.cipd.ensure(sdk_dir, pkgs)
       return sdk_dir
 
-  def _sdk_env(self, sdk_dir):
+  def _sdk_env(self, sdk_dir, target_arch):
     """Constructs the environment for the SDK.
 
     Returns environment and environment prefixes.
 
     Args:
       sdk_dir (path): Path to a directory containing the SDK.
+      target_arch (str): 'x86' or 'x64'
     """
     env = {}
     env_prefixes = {}
@@ -89,7 +103,8 @@ class WindowsSDKApi(recipe_api.RecipeApi):
     # }
     # All these environment variables need to be added to the environment
     # for the compiler and linker to work.
-    filename = 'SetEnv.%s.json' % {32: 'x86', 64: 'x64'}[self.m.platform.bits]
+    assert target_arch in ('x86', 'x64')
+    filename = 'SetEnv.%s.json' % target_arch
     step_result = self.m.json.read(
         'read %s' % filename, sdk_dir.join('win_sdk', 'bin', filename),
         step_test_data=lambda: self.m.json.test_api.output({

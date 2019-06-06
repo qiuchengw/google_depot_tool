@@ -3,7 +3,7 @@
     "cmd": [
       "python",
       "-u",
-      "RECIPE_PACKAGE_REPO[depot_tools]/gerrit_client.py",
+      "RECIPE_REPO[depot_tools]/gerrit_client.py",
       "changes",
       "--host",
       "https://chromium-review.googlesource.com",
@@ -19,10 +19,11 @@
       "DOWNLOAD_COMMANDS"
     ],
     "env": {
-      "PATH": "<PATH>:RECIPE_PACKAGE_REPO[depot_tools]"
+      "PATH": "<PATH>:RECIPE_REPO[depot_tools]"
     },
     "infra_step": true,
     "name": "gerrit fetch current CL info",
+    "timeout": 600,
     "~followup_annotations": [
       "@@@STEP_LOG_LINE@json.output@[@@@",
       "@@@STEP_LOG_LINE@json.output@  {@@@",
@@ -42,7 +43,7 @@
     "cmd": [
       "python",
       "-u",
-      "RECIPE_PACKAGE_REPO[depot_tools]/gerrit_client.py",
+      "RECIPE_REPO[depot_tools]/gerrit_client.py",
       "changes",
       "--host",
       "https://chromium-review.googlesource.com",
@@ -58,7 +59,7 @@
       "ALL_COMMITS"
     ],
     "env": {
-      "PATH": "<PATH>:RECIPE_PACKAGE_REPO[depot_tools]"
+      "PATH": "<PATH>:RECIPE_REPO[depot_tools]"
     },
     "infra_step": true,
     "name": "gerrit changes",
@@ -90,7 +91,7 @@
     "cmd": [
       "python",
       "-u",
-      "RECIPE_PACKAGE_REPO[depot_tools]/git_footers.py",
+      "RECIPE_REPO[depot_tools]/git_footers.py",
       "--json",
       "/path/to/tmp/json"
     ],
@@ -113,12 +114,60 @@
     ],
     "infra_step": true,
     "name": "git diff to analyze patch",
-    "stdout": "/path/to/tmp/",
     "~followup_annotations": [
       "@@@STEP_LOG_LINE@files@None/foo.cc@@@",
-      "@@@STEP_LOG_END@files@@@",
-      "@@@SET_BUILD_PROPERTY@failure_type@\"INVALID_TEST_RESULTS\"@@@",
+      "@@@STEP_LOG_END@files@@@"
+    ]
+  },
+  {
+    "cmd": [],
+    "name": "TRYJOB SET SUBPROJECT_TAG",
+    "~followup_annotations": [
+      "@@@STEP_TEXT@v8@@@",
       "@@@SET_BUILD_PROPERTY@subproject_tag@\"v8\"@@@"
+    ]
+  },
+  {
+    "cmd": [],
+    "name": "TRYJOB FAILURE",
+    "~followup_annotations": [
+      "@@@STEP_TEXT@PATCH_FAILURE@@@",
+      "@@@SET_BUILD_PROPERTY@failure_type@\"PATCH_FAILURE\"@@@",
+      "@@@STEP_FAILURE@@@"
+    ]
+  },
+  {
+    "cmd": [],
+    "name": "TRYJOB DO NOT RETRY",
+    "~followup_annotations": [
+      "@@@SET_BUILD_PROPERTY@do_not_retry@true@@@"
+    ]
+  },
+  {
+    "cmd": [],
+    "name": "TRYJOB FAILURE (2)",
+    "~followup_annotations": [
+      "@@@STEP_TEXT@COMPILE_FAILURE@@@",
+      "@@@SET_BUILD_PROPERTY@failure_type@\"COMPILE_FAILURE\"@@@",
+      "@@@STEP_FAILURE@@@"
+    ]
+  },
+  {
+    "cmd": [],
+    "name": "TRYJOB FAILURE (3)",
+    "~followup_annotations": [
+      "@@@STEP_TEXT@TEST_FAILURE@@@",
+      "@@@SET_BUILD_PROPERTY@failure_type@\"TEST_FAILURE\"@@@",
+      "@@@STEP_FAILURE@@@"
+    ]
+  },
+  {
+    "cmd": [],
+    "name": "TRYJOB FAILURE (4)",
+    "~followup_annotations": [
+      "@@@STEP_TEXT@INVALID_TEST_RESULTS@@@",
+      "@@@SET_BUILD_PROPERTY@failure_type@\"INVALID_TEST_RESULTS\"@@@",
+      "@@@STEP_FAILURE@@@"
     ]
   },
   {
@@ -129,16 +178,16 @@
     ],
     "name": "fail",
     "~followup_annotations": [
-      "step returned non-zero exit code: 1",
       "@@@STEP_TEXT@foo@@@",
-      "@@@STEP_FAILURE@@@",
-      "@@@SET_BUILD_PROPERTY@failure_hash@\"c2311ad770732eade3d2f48247abd147e40a70e7\"@@@"
+      "@@@SET_BUILD_PROPERTY@failure_hash@\"622c0c52e65e6d0dc78957dd113ad343e57ae6d2\"@@@",
+      "@@@STEP_FAILURE@@@"
     ]
   },
   {
-    "name": "$result",
-    "reason": "Step('fail') failed with return_code 1",
-    "recipe_result": null,
-    "status_code": 1
+    "failure": {
+      "failure": {},
+      "humanReason": "Step('fail') (retcode: 1)"
+    },
+    "name": "$result"
   }
 ]

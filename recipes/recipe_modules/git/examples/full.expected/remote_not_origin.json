@@ -25,7 +25,7 @@
     ],
     "cwd": "[START_DIR]/src",
     "env": {
-      "PATH": "RECIPE_PACKAGE_REPO[depot_tools]:<PATH>"
+      "PATH": "RECIPE_REPO[depot_tools]:<PATH>"
     },
     "infra_step": true,
     "name": "git fetch"
@@ -50,7 +50,6 @@
     "cwd": "[START_DIR]/src",
     "infra_step": true,
     "name": "read revision",
-    "stdout": "/path/to/tmp/",
     "~followup_annotations": [
       "@@@STEP_TEXT@<br/>checked out 'deadbeef'<br/>@@@"
     ]
@@ -99,8 +98,7 @@
     ],
     "cwd": "[START_DIR]/src",
     "infra_step": true,
-    "name": "count-objects",
-    "stdout": "/path/to/tmp/"
+    "name": "count-objects"
   },
   {
     "cmd": [
@@ -112,7 +110,6 @@
     "cwd": "[START_DIR]/src",
     "infra_step": true,
     "name": "git config remote.origin.url",
-    "stdout": "/path/to/tmp/",
     "~followup_annotations": [
       "@@@STEP_TEXT@foo@@@"
     ]
@@ -127,8 +124,7 @@
     ],
     "cwd": "[START_DIR]/src",
     "infra_step": true,
-    "name": "git show",
-    "stdout": "/path/to/tmp/"
+    "name": "git show"
   },
   {
     "cmd": [
@@ -176,7 +172,7 @@
     ],
     "cwd": "[START_DIR]/src",
     "env": {
-      "PATH": "RECIPE_PACKAGE_REPO[depot_tools]:<PATH>"
+      "PATH": "RECIPE_REPO[depot_tools]:<PATH>"
     },
     "infra_step": true,
     "name": "git new-branch refactor"
@@ -191,7 +187,7 @@
     ],
     "cwd": "[START_DIR]/src",
     "env": {
-      "PATH": "RECIPE_PACKAGE_REPO[depot_tools]:<PATH>"
+      "PATH": "RECIPE_REPO[depot_tools]:<PATH>"
     },
     "infra_step": true,
     "name": "git new-branch feature"
@@ -219,8 +215,6 @@
     "name": "git bundle"
   },
   {
-    "name": "$result",
-    "recipe_result": null,
-    "status_code": 0
+    "name": "$result"
   }
 ]

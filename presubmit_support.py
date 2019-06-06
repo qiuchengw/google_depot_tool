@@ -6,6 +6,8 @@
 """Enables directory-specific presubmit checks to run at upload and/or commit.
 """
 
+from __future__ import print_function
+
 __version__ = '1.8.0'
 
 # TODO(joi) Add caching where appropriate/needed. The API is designed to allow
@@ -44,7 +46,8 @@ from warnings import warn
 
 # Local imports.
 import fix_encoding
-import gclient_utils  # Exposed through the API
+import gclient_paths  # Exposed through the API
+import gclient_utils
 import git_footers
 import gerrit_util
 import owners
@@ -437,39 +440,6 @@ class OutputApi(object):
       return self.PresubmitNotifyResult(*args, **kwargs)
     return self.PresubmitPromptWarning(*args, **kwargs)
 
-  def EnsureCQIncludeTrybotsAreAdded(self, cl, bots_to_include, message):
-    """Helper for any PostUploadHook wishing to add CQ_INCLUDE_TRYBOTS.
-
-    Merges the bots_to_include into the current CQ_INCLUDE_TRYBOTS list,
-    keeping it alphabetically sorted. Returns the results that should be
-    returned from the PostUploadHook.
-
-    Args:
-      cl: The git_cl.Changelist object.
-      bots_to_include: A list of strings of bots to include, in the form
-        "master:slave".
-      message: A message to be printed in the case that
-        CQ_INCLUDE_TRYBOTS was updated.
-    """
-    description = cl.GetDescription(force=True)
-    trybot_footers = git_footers.parse_footers(description).get(
-        git_footers.normalize_name('Cq-Include-Trybots'), [])
-    prior_bots = []
-    for f in trybot_footers:
-      prior_bots += [b.strip() for b in f.split(';') if b.strip()]
-
-    if set(prior_bots) >= set(bots_to_include):
-      return []
-    all_bots = ';'.join(sorted(set(prior_bots) | set(bots_to_include)))
-
-    description = git_footers.remove_footer(description, 'Cq-Include-Trybots')
-    description = git_footers.add_footer(
-        description, 'Cq-Include-Trybots', all_bots,
-        before_keys=['Change-Id'])
-
-    cl.UpdateDescription(description, force=True)
-    return [self.PresubmitNotifyResult(message)]
-
 
 class InputApi(object):
   """An instance of this object is passed to presubmit scripts so they can
@@ -549,7 +519,10 @@ class InputApi(object):
     self.cpplint = cpplint
     self.cStringIO = cStringIO
     self.fnmatch = fnmatch
-    self.gclient_utils = gclient_utils
+    self.gclient_paths = gclient_paths
+    # TODO(yyanagisawa): stop exposing this when python3 become default.
+    # Since python3's tempfile has TemporaryDirectory, we do not need this.
+    self.temporary_directory = gclient_utils.temporary_directory
     self.glob = glob.glob
     self.json = json
     self.logging = logging.getLogger('PRESUBMIT')
@@ -758,11 +731,8 @@ class InputApi(object):
     return 'TBR' in self.change.tags or self.change.TBRsFromDescription()
 
   def RunTests(self, tests_mix, parallel=True):
-    # RunTests doesn't actually run tests. It adds them to a ThreadPool that
-    # will run all tests once all PRESUBMIT files are processed.
     tests = []
     msgs = []
-    parallel = parallel and self.parallel
     for t in tests_mix:
       if isinstance(t, OutputApi.PresubmitResult) and t:
         msgs.append(t)
@@ -774,7 +744,11 @@ class InputApi(object):
         if not t.kwargs.get('cwd'):
           t.kwargs['cwd'] = self.PresubmitLocalPath()
     self.thread_pool.AddTests(tests, parallel)
-    if not parallel:
+    # When self.parallel is True (i.e. --parallel is passed as an option)
+    # RunTests doesn't actually run tests. It adds them to a ThreadPool that
+    # will run all tests once all PRESUBMIT files are processed.
+    # Otherwise, it will run them and return the results.
+    if not self.parallel:
       msgs.extend(self.thread_pool.RunAsync())
     return msgs
 
@@ -1065,7 +1039,11 @@ class Change(object):
   def BugsFromDescription(self):
     """Returns all bugs referenced in the commit description."""
     tags = [b.strip() for b in self.tags.get('BUG', '').split(',') if b.strip()]
-    footers = git_footers.parse_footers(self._full_description).get('Bug', [])
+    footers = []
+    unsplit_footers = git_footers.parse_footers(self._full_description).get(
+        'Bug', [])
+    for unsplit_footer in unsplit_footers:
+      footers += [b.strip() for b in unsplit_footer.split(',')]
     return sorted(set(tags + footers))
 
   def ReviewersFromDescription(self):
@@ -1241,8 +1219,9 @@ class GetTryMastersExecuter(object):
     """
     context = {}
     try:
-      exec script_text in context
-    except Exception, e:
+      exec(compile(script_text, 'PRESUBMIT.py', 'exec', dont_inherit=True),
+           context)
+    except Exception as e:
       raise PresubmitFailure('"%s" had an exception.\n%s'
                              % (presubmit_path, e))
 
@@ -1272,8 +1251,9 @@ class GetPostUploadExecuter(object):
     """
     context = {}
     try:
-      exec script_text in context
-    except Exception, e:
+      exec(compile(script_text, 'PRESUBMIT.py', 'exec', dont_inherit=True),
+           context)
+    except Exception as e:
       raise PresubmitFailure('"%s" had an exception.\n%s'
                              % (presubmit_path, e))
 
@@ -1437,8 +1417,9 @@ class PresubmitExecuter(object):
     output_api = OutputApi(self.committing)
     context = {}
     try:
-      exec script_text in context
-    except Exception, e:
+      exec(compile(script_text, 'PRESUBMIT.py', 'exec', dont_inherit=True),
+           context)
+    except Exception as e:
       raise PresubmitFailure('"%s" had an exception.\n%s' % (presubmit_path, e))
 
     # These function names must change if we make substantial changes to
@@ -1739,9 +1720,9 @@ def main(argv=None):
           options.dry_run,
           options.parallel)
     return not results.should_continue()
-  except PresubmitFailure, e:
-    print >> sys.stderr, e
-    print >> sys.stderr, 'Maybe your depot_tools is out of date?'
+  except PresubmitFailure as e:
+    print(e, file=sys.stderr)
+    print('Maybe your depot_tools is out of date?', file=sys.stderr)
     return 2
 
 

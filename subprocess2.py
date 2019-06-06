@@ -1,4 +1,4 @@
-# coding=utf8
+# coding=utf-8
 # Copyright (c) 2012 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -7,15 +7,33 @@
 In theory you shouldn't need anything else in subprocess, or this module failed.
 """
 
-import cStringIO
+import codecs
 import errno
+import io
 import logging
 import os
-import Queue
+
+try:
+  import Queue
+except ImportError:  # For Py3 compatibility
+  import queue as Queue
+
 import subprocess
 import sys
 import time
 import threading
+
+# Cache the string-escape codec to ensure subprocess can find it later.
+# See crbug.com/912292#c2 for context.
+if sys.version_info.major == 2:
+  codecs.lookup('string-escape')
+
+# TODO(crbug.com/953884): Remove this when python3 migration is done.
+try:
+  basestring
+except NameError:
+  # pylint: disable=redefined-builtin
+  basestring = str
 
 
 # Constants forwarded from subprocess.
@@ -25,10 +43,6 @@ STDOUT = subprocess.STDOUT
 VOID = object()
 # Error code when a process was killed because it timed out.
 TIMED_OUT = -2001
-
-# Globals.
-# Set to True if you somehow need to disable this hack.
-SUBPROCESS_CLEANUP_HACKED = False
 
 
 class CalledProcessError(subprocess.CalledProcessError):
@@ -60,49 +74,9 @@ def kill_pid(pid):
     # Unable to import 'module'
     # pylint: disable=no-member,F0401
     import signal
-    return os.kill(pid, signal.SIGKILL)
+    return os.kill(pid, signal.SIGTERM)
   except ImportError:
     pass
-
-
-def kill_win(process):
-  """Kills a process with its windows handle.
-
-  Has no effect on other platforms.
-  """
-  try:
-    # Unable to import 'module'
-    # pylint: disable=import-error
-    import win32process
-    # Access to a protected member _handle of a client class
-    # pylint: disable=protected-access
-    return win32process.TerminateProcess(process._handle, -1)
-  except ImportError:
-    pass
-
-
-def add_kill():
-  """Adds kill() method to subprocess.Popen for python <2.6"""
-  if hasattr(subprocess.Popen, 'kill'):
-    return
-
-  if sys.platform == 'win32':
-    subprocess.Popen.kill = kill_win
-  else:
-    subprocess.Popen.kill = lambda process: kill_pid(process.pid)
-
-
-def hack_subprocess():
-  """subprocess functions may throw exceptions when used in multiple threads.
-
-  See http://bugs.python.org/issue1731717 for more information.
-  """
-  global SUBPROCESS_CLEANUP_HACKED
-  if not SUBPROCESS_CLEANUP_HACKED and threading.activeCount() != 1:
-    # Only hack if there is ever multiple threads.
-    # There is no point to leak with only one thread.
-    subprocess._cleanup = lambda: None
-    SUBPROCESS_CLEANUP_HACKED = True
 
 
 def get_english_env(env):
@@ -190,10 +164,6 @@ class Popen(subprocess.Popen):
   popen_lock = threading.Lock()
 
   def __init__(self, args, **kwargs):
-    # Make sure we hack subprocess if necessary.
-    hack_subprocess()
-    add_kill()
-
     env = get_english_env(kwargs.get('env'))
     if env:
       kwargs['env'] = env
@@ -244,7 +214,7 @@ class Popen(subprocess.Popen):
     try:
       with self.popen_lock:
         super(Popen, self).__init__(args, **kwargs)
-    except OSError, e:
+    except OSError as e:
       if e.errno == errno.EAGAIN and sys.platform == 'cygwin':
         # Convert fork() emulation failure into a CygwinRebaseError().
         raise CygwinRebaseError(
@@ -281,7 +251,7 @@ class Popen(subprocess.Popen):
 
     def write_stdin():
       try:
-        stdin_io = cStringIO.StringIO(input)
+        stdin_io = io.BytesIO(input)
         while True:
           data = stdin_io.read(1024)
           if data:

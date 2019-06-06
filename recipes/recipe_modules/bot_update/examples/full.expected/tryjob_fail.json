@@ -3,7 +3,7 @@
     "cmd": [
       "python",
       "-u",
-      "RECIPE_PACKAGE_REPO[depot_tools]/gerrit_client.py",
+      "RECIPE_REPO[depot_tools]/gerrit_client.py",
       "changes",
       "--host",
       "https://chromium-review.googlesource.com",
@@ -19,10 +19,11 @@
       "DOWNLOAD_COMMANDS"
     ],
     "env": {
-      "PATH": "<PATH>:RECIPE_PACKAGE_REPO[depot_tools]"
+      "PATH": "<PATH>:RECIPE_REPO[depot_tools]"
     },
     "infra_step": true,
     "name": "gerrit fetch current CL info",
+    "timeout": 600,
     "~followup_annotations": [
       "@@@STEP_LOG_LINE@json.output@[@@@",
       "@@@STEP_LOG_LINE@json.output@  {@@@",
@@ -56,20 +57,19 @@
       "--output_json",
       "/path/to/tmp/json",
       "--patch_ref",
-      "https://chromium.googlesource.com/chromium/src@refs/changes/56/123456/7",
+      "https://chromium.googlesource.com/chromium/src@refs/heads/master:refs/changes/56/123456/7",
       "--revision",
       "src@HEAD",
       "--disable-syntax-validation"
     ],
     "env_prefixes": {
       "PATH": [
-        "RECIPE_PACKAGE_REPO[depot_tools]"
+        "RECIPE_REPO[depot_tools]"
       ]
     },
     "infra_step": true,
     "name": "bot_update",
     "~followup_annotations": [
-      "step returned non-zero exit code: 1",
       "@@@STEP_LOG_END@json.output (invalid)@@@",
       "@@@STEP_LOG_LINE@json.output (exception)@No JSON object could be decoded@@@",
       "@@@STEP_LOG_END@json.output (exception)@@@",
@@ -77,9 +77,9 @@
     ]
   },
   {
-    "name": "$result",
-    "reason": "Infra Failure: Step('bot_update') returned 1",
-    "recipe_result": null,
-    "status_code": 1
+    "failure": {
+      "humanReason": "Infra Failure: Step('bot_update') (retcode: 1)"
+    },
+    "name": "$result"
   }
 ]

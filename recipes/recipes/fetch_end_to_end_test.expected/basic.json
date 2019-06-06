@@ -19,7 +19,7 @@
     ],
     "env_prefixes": {
       "PATH": [
-        "RECIPE_PACKAGE_REPO[depot_tools]"
+        "RECIPE_REPO[depot_tools]"
       ]
     },
     "infra_step": true,
@@ -74,7 +74,6 @@
     ],
     "infra_step": true,
     "name": "listdir fetch_configs",
-    "stdout": "/path/to/tmp/",
     "~followup_annotations": [
       "@@@STEP_LOG_LINE@listdir@[START_DIR]/depot_tools/fetch_configs/depot_tools.py@@@",
       "@@@STEP_LOG_LINE@listdir@[START_DIR]/depot_tools/fetch_configs/infra.py@@@",
@@ -88,7 +87,7 @@
       "[START_DIR]/depot_tools/fetch.py",
       "depot_tools"
     ],
-    "cwd": "[TMP_BASE]/fetch_end_to_end_test_depot_tools_tmp_1",
+    "cwd": "[CLEANUP]/fetch_end_to_end_test_depot_tools_tmp_1",
     "env": {
       "CHROME_HEADLESS": "1",
       "DEPOT_TOOLS_UPDATE": "0"
@@ -108,7 +107,7 @@
       "--json-output",
       "/path/to/tmp/json",
       "rmtree",
-      "[TMP_BASE]/fetch_end_to_end_test_depot_tools_tmp_1"
+      "[CLEANUP]/fetch_end_to_end_test_depot_tools_tmp_1"
     ],
     "env": {
       "CHROME_HEADLESS": "1",
@@ -129,7 +128,7 @@
       "[START_DIR]/depot_tools/fetch.py",
       "infra"
     ],
-    "cwd": "[TMP_BASE]/fetch_end_to_end_test_infra_tmp_2",
+    "cwd": "[CLEANUP]/fetch_end_to_end_test_infra_tmp_2",
     "env": {
       "CHROME_HEADLESS": "1",
       "DEPOT_TOOLS_UPDATE": "0"
@@ -149,7 +148,7 @@
       "--json-output",
       "/path/to/tmp/json",
       "rmtree",
-      "[TMP_BASE]/fetch_end_to_end_test_infra_tmp_2"
+      "[CLEANUP]/fetch_end_to_end_test_infra_tmp_2"
     ],
     "env": {
       "CHROME_HEADLESS": "1",
@@ -164,8 +163,6 @@
     "name": "cleanup (2)"
   },
   {
-    "name": "$result",
-    "recipe_result": null,
-    "status_code": 0
+    "name": "$result"
   }
 ]

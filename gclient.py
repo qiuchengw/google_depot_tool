@@ -96,12 +96,17 @@ import pprint
 import re
 import sys
 import time
-import urlparse
+
+try:
+  import urlparse
+except ImportError:  # For Py3 compatibility
+  import urllib.parse as urlparse
 
 import detect_host_arch
 import fix_encoding
 import gclient_eval
 import gclient_scm
+import gclient_paths
 import gclient_utils
 import git_cache
 import metrics
@@ -111,6 +116,16 @@ import subcommand
 import subprocess2
 import setup_color
 
+
+# TODO(crbug.com/953884): Remove this when python3 migration is done.
+try:
+  basestring
+except NameError:
+  # pylint: disable=redefined-builtin
+  basestring = str
+
+
+DEPOT_TOOLS_DIR = os.path.dirname(os.path.abspath(os.path.realpath(__file__)))
 
 # Singleton object to represent an unset cache_dir (as opposed to a disabled
 # one, e.g. if a spec explicitly says `cache_dir = None`.)
@@ -134,7 +149,7 @@ def ToGNString(value, allow_dicts = True):
         value.replace('\\', '\\\\').replace('"', '\\"').replace('$', '\\$') + \
         '"'
 
-  if isinstance(value, unicode):
+  if sys.version_info.major == 2 and isinstance(value, unicode):
     return ToGNString(value.encode('utf-8'))
 
   if isinstance(value, bool):
@@ -571,7 +586,7 @@ class Dependency(gclient_utils.WorkItem, DependencySettings):
 
     # If a line is in custom_deps, but not in the solution, we want to append
     # this line to the solution.
-    for dep_name, dep_info in self.custom_deps.iteritems():
+    for dep_name, dep_info in self.custom_deps.items():
       if dep_name not in deps:
         deps[dep_name] = {'url': dep_info, 'dep_type': 'git'}
 
@@ -600,7 +615,7 @@ class Dependency(gclient_utils.WorkItem, DependencySettings):
   def _deps_to_objects(self, deps, use_relative_paths):
     """Convert a deps dict to a dict of Dependency objects."""
     deps_to_add = []
-    for name, dep_value in deps.iteritems():
+    for name, dep_value in deps.items():
       should_process = self.should_process
       if dep_value is None:
         continue
@@ -681,7 +696,7 @@ class Dependency(gclient_utils.WorkItem, DependencySettings):
       try:
         local_scope = gclient_eval.Parse(
             deps_content, self._get_option('validate_syntax', False),
-            filepath, self.get_vars())
+            filepath, self.get_vars(), self.get_builtin_vars())
       except SyntaxError as e:
         gclient_utils.SyntaxErrorToError(filepath, e)
 
@@ -708,7 +723,7 @@ class Dependency(gclient_utils.WorkItem, DependencySettings):
 
     self._vars = local_scope.get('vars', {})
     if self.parent:
-      for key, value in self.parent.get_vars().iteritems():
+      for key, value in self.parent.get_vars().items():
         if key in self._vars:
           self._vars[key] = value
     # Since we heavily post-process things, freeze ones which should
@@ -745,7 +760,7 @@ class Dependency(gclient_utils.WorkItem, DependencySettings):
       if rel_prefix:
         logging.warning('Updating recursedeps by prepending %s.', rel_prefix)
         rel_deps = {}
-        for depname, options in self.recursedeps.iteritems():
+        for depname, options in self.recursedeps.items():
           rel_deps[
               os.path.normpath(os.path.join(rel_prefix, depname))] = options
         self.recursedeps = rel_deps
@@ -1192,11 +1207,8 @@ class Dependency(gclient_utils.WorkItem, DependencySettings):
       d = d.parent
     return tuple(out)
 
-  def get_vars(self):
-    """Returns a dictionary of effective variable values
-    (DEPS file contents with applied custom_vars overrides)."""
-    # Provide some built-in variables.
-    result = {
+  def get_builtin_vars(self):
+    return {
         'checkout_android': 'android' in self.target_os,
         'checkout_chromeos': 'chromeos' in self.target_os,
         'checkout_fuchsia': 'fuchsia' in self.target_os,
@@ -1216,15 +1228,22 @@ class Dependency(gclient_utils.WorkItem, DependencySettings):
         'checkout_x64': 'x64' in self.target_cpu,
         'host_cpu': detect_host_arch.HostArch(),
     }
-    # Variable precedence:
-    # - built-in
+
+  def get_vars(self):
+    """Returns a dictionary of effective variable values
+    (DEPS file contents with applied custom_vars overrides)."""
+    # Variable precedence (last has highest):
     # - DEPS vars
     # - parents, from first to last
+    # - built-in
     # - custom_vars overrides
+    result = {}
     result.update(self._vars)
     if self.parent:
       parent_vars = self.parent.get_vars()
       result.update(parent_vars)
+    # Provide some built-in variables.
+    result.update(self.get_builtin_vars())
     result.update(self.custom_vars or {})
     return result
 
@@ -1276,6 +1295,7 @@ class GClient(GitDependency):
     "android": "android",
     "ios": "ios",
     "fuchsia": "fuchsia",
+    "chromeos": "chromeos",
   }
 
   DEFAULT_CLIENT_FILE_TEXT = ("""\
@@ -1347,7 +1367,8 @@ solutions = %(solution_list)s
                                                 mirror.exists())
           else:
             mirror_string = 'not used'
-          raise gclient_utils.Error('''
+          raise gclient_utils.Error(
+              '''
 Your .gclient file seems to be broken. The requested URL is different from what
 is actually checked out in %(checkout_path)s.
 
@@ -1363,7 +1384,7 @@ it or fix the checkout.
 '''  % {'checkout_path': os.path.join(self.root_dir, dep.name),
         'expected_url': dep.url,
         'expected_scm': dep.GetScmName(),
-        'mirror_string' : mirror_string,
+        'mirror_string': mirror_string,
         'actual_url': actual_url,
         'actual_scm': dep.GetScmName()})
 
@@ -1429,7 +1450,7 @@ it or fix the checkout.
     metrics.collector.add(
         'project_urls',
         [
-            dep.url if not dep.url.endswith('.git') else dep.url[:-len('.git')]
+            dep.FuzzyMatchUrl(metrics_utils.KNOWN_PROJECT_URLS)
             for dep in deps_to_add
             if dep.FuzzyMatchUrl(metrics_utils.KNOWN_PROJECT_URLS)
         ]
@@ -1454,7 +1475,7 @@ it or fix the checkout.
       if options.verbose:
         print('Looking for %s starting from %s\n' % (
             options.config_filename, os.getcwd()))
-      path = gclient_utils.FindGclientRoot(os.getcwd(), options.config_filename)
+      path = gclient_paths.FindGclientRoot(os.getcwd(), options.config_filename)
       if not path:
         if options.verbose:
           print('Couldn\'t find configuration file.')
@@ -1553,13 +1574,12 @@ it or fix the checkout.
       return patch_refs, target_branches
     for given_patch_ref in self._options.patch_refs:
       patch_repo, _, patch_ref = given_patch_ref.partition('@')
-      if not patch_repo or not patch_ref:
+      if not patch_repo or not patch_ref or ':' not in patch_ref:
         raise gclient_utils.Error(
             'Wrong revision format: %s should be of the form '
-            'patch_repo@[target_branch:]patch_ref.' % given_patch_ref)
-      if ':' in patch_ref:
-        target_branch, _, patch_ref = patch_ref.partition(':')
-        target_branches[patch_repo] = target_branch
+            'patch_repo@target_branch:patch_ref.' % given_patch_ref)
+      target_branch, _, patch_ref = patch_ref.partition(':')
+      target_branches[patch_repo] = target_branch
       patch_refs[patch_repo] = patch_ref
     return patch_refs, target_branches
 
@@ -1575,7 +1595,7 @@ it or fix the checkout.
     full_entries = [os.path.join(self.root_dir, e.replace('/', os.path.sep))
                     for e in entries]
 
-    for entry, prev_url in self._ReadEntries().iteritems():
+    for entry, prev_url in self._ReadEntries().items():
       if not prev_url:
         # entry must have been overridden via .gclient custom_deps
         continue
@@ -1629,12 +1649,11 @@ it or fix the checkout.
               # clean checkout.
               gclient_scm.scm.GIT.CleanupDir(par_scm_root, rel_e_dir)
               assert not os.path.exists(os.path.join(e_dir, '.git'))
-              print(('\nWARNING: \'%s\' has been moved from DEPS to a higher '
-                     'level checkout. The git folder containing all the local'
-                     ' branches has been saved to %s.\n'
-                     'If you don\'t care about its state you can safely '
-                     'remove that folder to free up space.') %
-                    (entry, save_dir))
+              print('\nWARNING: \'%s\' has been moved from DEPS to a higher '
+                    'level checkout. The git folder containing all the local'
+                    ' branches has been saved to %s.\n'
+                    'If you don\'t care about its state you can safely '
+                    'remove that folder to free up space.' % (entry, save_dir))
               continue
 
         if scm_root in full_entries:
@@ -1649,9 +1668,23 @@ it or fix the checkout.
             (modified_files and not self._options.force)):
           # There are modified files in this entry. Keep warning until
           # removed.
-          print(('\nWARNING: \'%s\' is no longer part of this client.  '
-                 'It is recommended that you manually remove it.\n') %
-                    entry_fixed)
+          self.add_dependency(
+              GitDependency(
+                  parent=self,
+                  name=entry,
+                  url=prev_url,
+                  managed=False,
+                  custom_deps={},
+                  custom_vars={},
+                  custom_hooks=[],
+                  deps_file=None,
+                  should_process=True,
+                  should_recurse=False,
+                  relative=None,
+                  condition=None))
+          print('\nWARNING: \'%s\' is no longer part of this client.\n'
+                'It is recommended that you manually remove it or use '
+                '\'gclient sync -D\' next time.' % entry_fixed)
         else:
           # Delete the entry
           print('\n________ deleting \'%s\' in \'%s\'' % (
@@ -1872,10 +1905,6 @@ class CipdDependency(Dependency):
         should_recurse=False,
         relative=relative,
         condition=condition)
-    if relative:
-      # TODO(jbudorick): Implement relative if necessary.
-      raise gclient_utils.Error(
-          'Relative CIPD dependencies are not currently supported.')
     self._cipd_package = None
     self._cipd_root = cipd_root
     # CIPD wants /-separated paths, even on Windows.
@@ -2152,7 +2181,9 @@ class Flattener(object):
     for key, value in dep._vars.iteritems():
       # Make sure there are no conflicting variables. It is fine however
       # to use same variable name, as long as the value is consistent.
-      assert key not in self._vars or self._vars[key][1] == value
+      assert key not in self._vars or self._vars[key][1] == value, (
+        "dep:%s key:%s value:%s != %s" % (
+          dep.name, key, value, self._vars[key][1]))
       self._vars[key] = (hierarchy, value)
     # Override explicit custom variables.
     for key, value in dep.custom_vars.iteritems():
@@ -2566,7 +2597,7 @@ def CMDsync(parser, args):
   parser.add_option('--patch-ref', action='append',
                     dest='patch_refs', metavar='GERRIT_REF', default=[],
                     help='Patches the given reference with the format '
-                         'dep@[target-ref:]patch-ref. '
+                         'dep@target-ref:patch-ref. '
                          'For |dep|, you can specify URLs as well as paths, '
                          'with URLs taking preference. '
                          '|patch-ref| will be applied to |dep|, rebased on top '
@@ -2576,10 +2607,7 @@ def CMDsync(parser, args):
                          '|target-ref| is the target branch against which a '
                          'patch was created, it is used to determine which '
                          'commits from the |patch-ref| actually constitute a '
-                         'patch. If not given, we will iterate over all remote '
-                         'branches and select one that contains the revision '
-                         '|dep| is synced at. '
-                         'WARNING: |target-ref| will be mandatory soon.')
+                         'patch.')
   parser.add_option('--with_branch_heads', action='store_true',
                     help='Clone git "branch_heads" refspecs in addition to '
                          'the default refspecs. This adds about 1/2GB to a '
@@ -2810,7 +2838,7 @@ def CMDgetdep(parser, args):
                     dest='vars', metavar='VAR', default=[],
                     help='Gets the value of a given variable.')
   parser.add_option('-r', '--revision', action='append',
-                    dest='revisions', metavar='DEP', default=[],
+                    dest='getdep_revisions', metavar='DEP', default=[],
                     help='Gets the revision/version for the given dependency. '
                          'If it is a git dependency, dep must be a path. If it '
                          'is a CIPD dependency, dep must be of the form '
@@ -2827,12 +2855,21 @@ def CMDgetdep(parser, args):
         'DEPS file %s does not exist.' % options.deps_file)
   with open(options.deps_file) as f:
     contents = f.read()
-  local_scope = gclient_eval.Exec(contents, options.deps_file)
+  client = GClient.LoadCurrentConfig(options)
+  if client is not None:
+    builtin_vars = client.get_builtin_vars()
+  else:
+    logging.warn(
+        'Couldn\'t find a valid gclient config. Will attempt to parse the DEPS '
+        'file without support for built-in variables.')
+    builtin_vars = None
+  local_scope = gclient_eval.Exec(contents, options.deps_file,
+                                  builtin_vars=builtin_vars)
 
   for var in options.vars:
     print(gclient_eval.GetVar(local_scope, var))
 
-  for name in options.revisions:
+  for name in options.getdep_revisions:
     if ':' in name:
       name, _, package = name.partition(':')
       if not name or not package:
@@ -2852,7 +2889,7 @@ def CMDsetdep(parser, args):
                     help='Sets a variable to the given value with the format '
                          'name=value.')
   parser.add_option('-r', '--revision', action='append',
-                    dest='revisions', metavar='DEP@REV', default=[],
+                    dest='setdep_revisions', metavar='DEP@REV', default=[],
                     help='Sets the revision/version for the dependency with '
                          'the format dep@rev. If it is a git dependency, dep '
                          'must be a path and rev must be a git hash or '
@@ -2868,7 +2905,7 @@ def CMDsetdep(parser, args):
   (options, args) = parser.parse_args(args)
   if args:
     parser.error('Unused arguments: "%s"' % '" "'.join(args))
-  if not options.revisions and not options.vars:
+  if not options.setdep_revisions and not options.vars:
     parser.error(
         'You must specify at least one variable or revision to modify.')
 
@@ -2877,7 +2914,18 @@ def CMDsetdep(parser, args):
         'DEPS file %s does not exist.' % options.deps_file)
   with open(options.deps_file) as f:
     contents = f.read()
-  local_scope = gclient_eval.Exec(contents, options.deps_file)
+
+  client = GClient.LoadCurrentConfig(options)
+  if client is not None:
+    builtin_vars = client.get_builtin_vars()
+  else:
+    logging.warn(
+        'Couldn\'t find a valid gclient config. Will attempt to parse the DEPS '
+        'file without support for built-in variables.')
+    builtin_vars = None
+
+  local_scope = gclient_eval.Exec(contents, options.deps_file,
+                                  builtin_vars=builtin_vars)
 
   for var in options.vars:
     name, _, value = var.partition('=')
@@ -2889,7 +2937,7 @@ def CMDsetdep(parser, args):
     else:
       gclient_eval.AddVar(local_scope, name, value)
 
-  for revision in options.revisions:
+  for revision in options.setdep_revisions:
     name, _, value = revision.partition('@')
     if not name or not value:
       parser.error(
@@ -3047,19 +3095,41 @@ def disable_buffering():
   sys.stdout = gclient_utils.MakeFileAnnotated(sys.stdout)
 
 
-def main(argv):
-  """Doesn't parse the arguments here, just find the right subcommand to
-  execute."""
+def path_contains_tilde():
+  for element in os.environ['PATH'].split(os.pathsep):
+    if element.startswith('~') and os.path.abspath(
+        os.path.realpath(os.path.expanduser(element))) == DEPOT_TOOLS_DIR:
+      return True
+  return False
+
+
+def can_run_gclient_and_helpers():
   if sys.hexversion < 0x02060000:
     print(
         '\nYour python version %s is unsupported, please upgrade.\n' %
         sys.version.split(' ', 1)[0],
         file=sys.stderr)
-    return 2
+    return False
   if not sys.executable:
     print(
         '\nPython cannot find the location of it\'s own executable.\n',
         file=sys.stderr)
+    return False
+  if path_contains_tilde():
+    print(
+        '\nYour PATH contains a literal "~", which works in some shells ' +
+        'but will break when python tries to run subprocesses. ' +
+        'Replace the "~" with $HOME.\n' +
+        'See https://crbug.com/952865.\n',
+        file=sys.stderr)
+    return False
+  return True
+
+
+def main(argv):
+  """Doesn't parse the arguments here, just find the right subcommand to
+  execute."""
+  if not can_run_gclient_and_helpers():
     return 2
   fix_encoding.fix_encoding()
   disable_buffering()

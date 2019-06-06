@@ -81,6 +81,7 @@ class TryserverApi(recipe_api.RecipeApi):
         o_params=['ALL_REVISIONS', 'DOWNLOAD_COMMANDS'],
         limit=1,
         name='fetch current CL info',
+        timeout=600,
         step_test_data=lambda: self.m.json.test_api.output(mock_res))[0]
 
     self._gerrit_change_target_ref = res['branch']
@@ -168,15 +169,29 @@ class TryserverApi(recipe_api.RecipeApi):
     """
     assert self.is_tryserver
 
-    step_result = self.m.step.active_result
+    step_result = self.m.step('TRYJOB SET SUBPROJECT_TAG', cmd=None)
     step_result.presentation.properties['subproject_tag'] = subproject_tag
+    step_result.presentation.step_text = subproject_tag
 
   def _set_failure_type(self, failure_type):
     if not self.is_tryserver:
       return
 
-    step_result = self.m.step.active_result
+    # TODO(iannucci): add API to set properties regardless of the current step.
+    step_result = self.m.step('TRYJOB FAILURE', cmd=None)
     step_result.presentation.properties['failure_type'] = failure_type
+    step_result.presentation.step_text = failure_type
+    step_result.presentation.status = 'FAILURE'
+
+  def set_do_not_retry_build(self):
+    """A flag to indicate the build should not be retried by the CQ.
+
+    This mechanism is used to reduce CQ duration when retrying will likely
+    return an identical result.
+    """
+    # TODO(iannucci): add API to set properties regardless of the current step.
+    step_result = self.m.step('TRYJOB DO NOT RETRY', cmd=None)
+    step_result.presentation.properties['do_not_retry'] = True
 
   def set_patch_failure_tryjob_result(self):
     """Mark the tryjob result as failure to apply the patch."""
@@ -227,6 +242,8 @@ class TryserverApi(recipe_api.RecipeApi):
     except self.m.step.StepFailure as e:
       self.add_failure_reason(e.reason)
 
+      # TODO(iannucci): add API to set properties regardless of the current
+      # step.
       try:
         step_result = self.m.step.active_result
       except ValueError:
@@ -254,7 +271,7 @@ class TryserverApi(recipe_api.RecipeApi):
             int(self.gerrit_change.patchset))
 
     result = self.m.python(
-        'parse description', self.package_repo_resource('git_footers.py'),
+        'parse description', self.repo_resource('git_footers.py'),
         args=['--json', self.m.json.output()],
         stdin=self.m.raw_io.input(data=patch_text))
     return result.json.output

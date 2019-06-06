@@ -15,7 +15,11 @@ import tempfile
 import threading
 import time
 import traceback
-import urllib2
+
+try:
+  import urllib2 as urllib
+except ImportError:  # For Py3 compatibility
+  import urllib.request as urllib
 
 import detect_host_arch
 import gclient_utils
@@ -60,15 +64,16 @@ class _Config(object):
       # check if we can reach the page. An external developer would get access
       # denied.
       try:
-        req = urllib2.urlopen(metrics_utils.APP_URL + '/should-upload')
+        req = urllib.urlopen(metrics_utils.APP_URL + '/should-upload')
         self._config['is-googler'] = req.getcode() == 200
-      except (urllib2.URLError, urllib2.HTTPError):
+      except (urllib.URLError, urllib.HTTPError):
         self._config['is-googler'] = False
 
     # Make sure the config variables we need are present, and initialize them to
     # safe values otherwise.
     self._config.setdefault('countdown', DEFAULT_COUNTDOWN)
     self._config.setdefault('opt-in', None)
+    self._config.setdefault('version', metrics_utils.CURRENT_VERSION)
 
     if config != self._config:
       print(INVALID_CONFIG_WARNING, file=sys.stderr)
@@ -84,6 +89,11 @@ class _Config(object):
       self._config['opt-in'] = False
 
   @property
+  def version(self):
+    self._ensure_initialized()
+    return self._config['version']
+
+  @property
   def is_googler(self):
     self._ensure_initialized()
     return self._config['is-googler']
@@ -97,6 +107,7 @@ class _Config(object):
   def opted_in(self, value):
     self._ensure_initialized()
     self._config['opt-in'] = value
+    self._config['version'] = metrics_utils.CURRENT_VERSION
     self._write_config()
 
   @property
@@ -104,12 +115,33 @@ class _Config(object):
     self._ensure_initialized()
     return self._config['countdown']
 
+  @property
+  def should_collect_metrics(self):
+    # Don't collect the metrics unless the user is a googler, the user has opted
+    # in, or the countdown has expired.
+    if not self.is_googler:
+      return False
+    if self.opted_in is False:
+      return False
+    if self.opted_in is None and self.countdown > 0:
+      return False
+    return True
+
   def decrease_countdown(self):
     self._ensure_initialized()
     if self.countdown == 0:
       return
     self._config['countdown'] -= 1
+    if self.countdown == 0:
+      self._config['version'] = metrics_utils.CURRENT_VERSION
     self._write_config()
+
+  def reset_config(self):
+    # Only reset countdown if we're already collecting metrics.
+    if self.should_collect_metrics:
+      self._ensure_initialized()
+      self._config['countdown'] = DEFAULT_COUNTDOWN
+      self._config['opt-in'] = None
 
 
 class MetricsCollector(object):
@@ -132,6 +164,11 @@ class MetricsCollector(object):
     if self._collect_custom_metrics:
       with self._metrics_lock:
         self._reported_metrics[name] = value
+
+  def add_repeated(self, name, value):
+    if self._collect_custom_metrics:
+      with self._metrics_lock:
+        self._reported_metrics.setdefault(name, []).append(value)
 
   @contextlib.contextmanager
   def pause_metrics_collection(self):
@@ -161,6 +198,7 @@ class MetricsCollector(object):
         return func(*args, **kwargs)
 
     self._collecting_metrics = True
+    self.add('metrics_version', metrics_utils.CURRENT_VERSION)
     self.add('command', command_name)
     try:
       start = time.time()
@@ -176,15 +214,22 @@ class MetricsCollector(object):
     self.add('exit_code', exit_code)
 
     # Add metrics regarding environment information.
-    self.add('timestamp', metrics_utils.seconds_to_weeks(time.time()))
+    self.add('timestamp', int(time.time()))
     self.add('python_version', metrics_utils.get_python_version())
     self.add('host_os', gclient_utils.GetMacWinOrLinux())
     self.add('host_arch', detect_host_arch.HostArch())
-    self.add('depot_tools_age', metrics_utils.get_repo_timestamp(DEPOT_TOOLS))
+
+    depot_tools_age = metrics_utils.get_repo_timestamp(DEPOT_TOOLS)
+    if depot_tools_age is not None:
+      self.add('depot_tools_age', int(depot_tools_age))
+
+    git_version = metrics_utils.get_git_version()
+    if git_version:
+      self.add('git_version', git_version)
 
     self._upload_metrics_data()
     if exception:
-      raise exception[0], exception[1], exception[2]
+      gclient_utils.reraise(exception[0], exception[1], exception[2])
     return result
 
   def collect_metrics(self, command_name):
@@ -198,10 +243,7 @@ class MetricsCollector(object):
       # file.
       if DISABLE_METRICS_COLLECTION:
         return func
-      # Don't collect the metrics unless the user is a googler, the user has
-      # opted in, or the countdown has expired.
-      if (not self.config.is_googler or self.config.opted_in == False
-          or (self.config.opted_in is None and self.config.countdown > 0)):
+      if not self.config.should_collect_metrics:
         return func
       # Otherwise, collect the metrics.
       # Needed to preserve the __name__ and __doc__ attributes of func.
@@ -235,6 +277,13 @@ class MetricsCollector(object):
         sys.stderr.write('Interrupted\n')
       elif not isinstance(exception[1], SystemExit):
         traceback.print_exception(*exception)
+
+    # Check if the version has changed
+    if (not DISABLE_METRICS_COLLECTION and self.config.is_googler
+        and self.config.opted_in is not False
+        and self.config.version != metrics_utils.CURRENT_VERSION):
+      metrics_utils.print_version_change(self.config.version)
+      self.config.reset_config()
 
     # Print the notice
     if (not DISABLE_METRICS_COLLECTION and self.config.is_googler
